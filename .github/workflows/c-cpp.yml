@@ -1,0 +1,50 @@
+name: Dtop CI
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-arm64:
+    runs-on: ubuntu-22.04
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up QEMU for cross-compilation
+      uses: docker/setup-qemu-action@v3
+      with:
+        platforms: arm64
+        
+    - name: Build in ARM64 container
+      uses: addnab/docker-run-action@v3
+      with:
+        image: ubuntu:22.04
+        options: --platform linux/arm64 -v ${{ github.workspace }}:/workspace
+        run: |
+          apt-get update
+          apt-get install -y build-essential gcc-11 g++-11 make file
+          update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100
+          update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 100
+          cd /workspace
+          make clean || true
+          make
+          ls -la bin/
+          file bin/dtop
+          
+    - name: Prepare release files
+      run: |
+        mkdir -p release
+        cp bin/dtop release/
+        cp -r themes release/
+        cp README.md release/
+        tar -czf dtop-arm64-ubuntu22.04.tar.gz release/
+        
+    - name: Upload to Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: dtop-arm64-ubuntu22.04.tar.gz
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
