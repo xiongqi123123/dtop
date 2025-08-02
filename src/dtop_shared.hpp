@@ -123,10 +123,10 @@ namespace Bpu {
 	extern int x, y, width, height, min_width, min_height;
 	extern bool shown, redraw, has_bpu;
 	extern string platform_type; // "rdks100", "rdkx5", "rdkx3"
-	extern int bpu_count; // S100: 4 (BPU+GPU+VPU+JPU), X5: 4 (BPU+GPU+VPU+JPU), X3: 2 (BPU0+BPU1)
+	extern int bpu_count; // S100: 6 (BPU+GPU+VPU+JPU+Main+MCU), X5: 4 (BPU+GPU+VPU+JPU), X3: 2 (BPU0+BPU1)
 
 	struct bpu_info {
-		vector<deque<long long>> usage; // Usage percentage for each processing unit (BPU, GPU, VPU, JPU)
+		vector<deque<long long>> usage; // Usage percentage for each processing unit (BPU, GPU, VPU, JPU, Main, MCU)
 		vector<deque<long long>> temp;  // Temperature for each processing unit (if available)
 		long long temp_max = 0;
 		bool has_temp_sensor = false;

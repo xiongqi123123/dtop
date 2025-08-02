@@ -827,7 +827,7 @@ namespace Cpu {
 			int bpu_line_width_needed = (show_temps ? 15 : 9);
 			const int bpu_column_width = bpu_b_width / bpu_columns;
 			
-			const vector<string> bpu_core_names = {"BPU", "GPU", "VPU", "JPU"};
+			const vector<string> bpu_core_names = {"BPU", "GPU", "VPU", "JPU", "Main", "MCU"};
 
 			for (const auto& n : iota(0, (int)bpu.usage.size())) {
 				// Calculate row and column for row-major layout (left-to-right, top-to-bottom)
@@ -849,18 +849,30 @@ namespace Cpu {
 				out += ' ';
 				out += Theme::c("inactive_fg")
 					+ graph_bg * 10
-					+ Mv::l(10)
-					+ Theme::g("temp").at(bpu.usage.at(n).empty() ? 0 : bpu.usage.at(n).back())
-					+ bpu_core_graphs.at(n)(bpu.usage.at(n), data_same or redraw);
+					+ Mv::l(10);
+				
+				// Main域和MCU域使用温度颜色和数据，其他使用使用率
+				if ((n == 4 || n == 5) && show_temps && bpu.has_temp_sensor && n < (int)bpu.temp.size() && !bpu.temp.at(n).empty()) {
+					// 温度图表（Main域和MCU域）
+					const auto& temp_color = Theme::g("temp").at(clamp(bpu.temp.at(n).back() * 100 / bpu.temp_max, 0ll, 100ll));
+					out += temp_color + bpu_core_graphs.at(n)(bpu.temp.at(n), data_same or redraw);
+				} else {
+					// 使用率图表（BPU, GPU, VPU, JPU）
+					out += Theme::g("temp").at(bpu.usage.at(n).empty() ? 0 : bpu.usage.at(n).back())
+						+ bpu_core_graphs.at(n)(bpu.usage.at(n), data_same or redraw);
+				}
 
-				out += rjust(to_string(bpu.usage.at(n).empty() ? 0 : bpu.usage.at(n).back()), 3)
-					+ Theme::c("main_fg") + '%';
-
-				// if (show_temps and bpu.has_temp_sensor and n < (int)bpu.temp.size() and not bpu.temp.at(n).empty()) {
-				// 	const auto [temp, unit] = celsius_to(bpu.temp.at(n).back(), temp_scale);
-				// 	const auto& temp_color = Theme::g("temp").at(clamp(bpu.temp.at(n).back() * 100 / bpu.temp_max, 0ll, 100ll));
-				// 	out += ' ' + temp_color + rjust(to_string(temp), 4) + Theme::c("main_fg") + unit;
-				// }
+				// Main域和MCU域显示温度，其他显示使用率百分比
+				if ((n == 4 || n == 5) && show_temps && bpu.has_temp_sensor && n < (int)bpu.temp.size() && !bpu.temp.at(n).empty()) {
+					// 显示温度（Main域和MCU域）
+					const auto [temp, unit] = celsius_to(bpu.temp.at(n).back(), temp_scale);
+					const auto& temp_color = Theme::g("temp").at(clamp(bpu.temp.at(n).back() * 100 / bpu.temp_max, 0ll, 100ll));
+					out += temp_color + rjust(to_string(temp), 3) + Theme::c("main_fg") + unit;
+				} else {
+					// 显示使用率百分比（BPU, GPU, VPU, JPU）
+					out += rjust(to_string(bpu.usage.at(n).empty() ? 0 : bpu.usage.at(n).back()), 3)
+						+ Theme::c("main_fg") + '%';
+				}
 
 				out += Theme::c("div_line") + Symbols::v_line; 
 			}

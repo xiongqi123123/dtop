@@ -1635,7 +1635,7 @@ namespace Bpu {
 				
 				if (s_contains(model_content, "S100")) {
 					platform_type = "rdks100";
-					bpu_count = 4; // BPU0, GPU, VPU, JPU
+					bpu_count = 6; // BPU0, GPU, VPU, JPU, Main, MCU
 					has_bpu = true;
 					Logger::debug("Bpu::detect_platform() - Detected RDK S100 platform with " + to_string(bpu_count) + " devices");
 				}
@@ -1672,8 +1672,11 @@ namespace Bpu {
 			
 			// Initialize temperature data with default value to ensure it's never empty
 			if (current_bpu.has_temp_sensor) {
-				current_bpu.temp[0].push_back(0); // Initial temperature value
-				Logger::debug("Bpu::detect_platform() - Initialized temperature data for " + platform_type);
+				// Initialize temperature for all devices with default values
+				for (int i = 0; i < bpu_count; i++) {
+					current_bpu.temp[i].push_back(0); // Initial temperature value
+				}
+				Logger::debug("Bpu::detect_platform() - Initialized temperature data for " + to_string(bpu_count) + " devices on " + platform_type);
 			}
 		}
 	}
@@ -1799,6 +1802,74 @@ namespace Bpu {
 			while (bpu.usage[3].size() > 40) bpu.usage[3].pop_front();
 			Logger::debug("Bpu::collect_rdk_s100_data() - JPU usage: " + to_string(usage) + "%");
 		}
+		
+		// Main域温度 - temp1和temp2的平均值
+		long long main_temp_total = 0;
+		int main_temp_count = 0;
+		
+		// 读取temp1_input (Main域第一个传感器)
+		for (const string temp_path : {"/sys/class/hwmon/hwmon0/temp1_input", "/sys/class/hwmon/hwmon1/temp1_input", "/sys/class/hwmon/hwmon2/temp1_input"}) {
+			string temp1_content = readfile(temp_path, "");
+			if (not temp1_content.empty() and isint(temp1_content)) {
+				main_temp_total += stol(temp1_content) / 1000; // 转换为摄氏度
+				main_temp_count++;
+				Logger::debug("Bpu::collect_rdk_s100_data() - Main temp1: " + to_string(stol(temp1_content) / 1000) + "°C from " + temp_path);
+				break;
+			}
+		}
+		
+		// 读取temp2_input (Main域第二个传感器)
+		for (const string temp_path : {"/sys/class/hwmon/hwmon0/temp2_input", "/sys/class/hwmon/hwmon1/temp2_input", "/sys/class/hwmon/hwmon2/temp2_input"}) {
+			string temp2_content = readfile(temp_path, "");
+			if (not temp2_content.empty() and isint(temp2_content)) {
+				main_temp_total += stol(temp2_content) / 1000; // 转换为摄氏度
+				main_temp_count++;
+				Logger::debug("Bpu::collect_rdk_s100_data() - Main temp2: " + to_string(stol(temp2_content) / 1000) + "°C from " + temp_path);
+				break;
+			}
+		}
+		
+		// 计算Main域平均温度
+		long long main_avg_temp = (main_temp_count > 0) ? (main_temp_total / main_temp_count) : 0;
+		bpu.usage[4].push_back(0); // Main域没有使用率，显示为0%
+		while (bpu.usage[4].size() > 40) bpu.usage[4].pop_front();
+		bpu.temp[4].push_back(main_avg_temp); // 存储Main域温度
+		while (bpu.temp[4].size() > 40) bpu.temp[4].pop_front();
+		Logger::debug("Bpu::collect_rdk_s100_data() - Main domain avg temp: " + to_string(main_avg_temp) + "°C");
+		
+		// MCU域温度 - temp3和temp4的平均值
+		long long mcu_temp_total = 0;
+		int mcu_temp_count = 0;
+		
+		// 读取temp3_input (MCU域第一个传感器)
+		for (const string temp_path : {"/sys/class/hwmon/hwmon0/temp3_input", "/sys/class/hwmon/hwmon1/temp3_input", "/sys/class/hwmon/hwmon2/temp3_input"}) {
+			string temp3_content = readfile(temp_path, "");
+			if (not temp3_content.empty() and isint(temp3_content)) {
+				mcu_temp_total += stol(temp3_content) / 1000; // 转换为摄氏度
+				mcu_temp_count++;
+				Logger::debug("Bpu::collect_rdk_s100_data() - MCU temp3: " + to_string(stol(temp3_content) / 1000) + "°C from " + temp_path);
+				break;
+			}
+		}
+		
+		// 读取temp4_input (MCU域第二个传感器)
+		for (const string temp_path : {"/sys/class/hwmon/hwmon0/temp4_input", "/sys/class/hwmon/hwmon1/temp4_input", "/sys/class/hwmon/hwmon2/temp4_input"}) {
+			string temp4_content = readfile(temp_path, "");
+			if (not temp4_content.empty() and isint(temp4_content)) {
+				mcu_temp_total += stol(temp4_content) / 1000; // 转换为摄氏度
+				mcu_temp_count++;
+				Logger::debug("Bpu::collect_rdk_s100_data() - MCU temp4: " + to_string(stol(temp4_content) / 1000) + "°C from " + temp_path);
+				break;
+			}
+		}
+		
+		// 计算MCU域平均温度
+		long long mcu_avg_temp = (mcu_temp_count > 0) ? (mcu_temp_total / mcu_temp_count) : 0;
+		bpu.usage[5].push_back(0); // MCU域没有使用率，显示为0%
+		while (bpu.usage[5].size() > 40) bpu.usage[5].pop_front();
+		bpu.temp[5].push_back(mcu_avg_temp); // 存储MCU域温度
+		while (bpu.temp[5].size() > 40) bpu.temp[5].pop_front();
+		Logger::debug("Bpu::collect_rdk_s100_data() - MCU domain avg temp: " + to_string(mcu_avg_temp) + "°C");
 	}
 	
 	void collect_rdk_x5_data(bpu_info& bpu) {
@@ -1882,7 +1953,7 @@ namespace Bpu {
 			else if (platform_type == "rdkx3") {
 				collect_rdk_x3_data(bpu);
 			}
-
+			
 			if (bpu.has_temp_sensor) {
 				string temp_path;
 				Logger::debug("Bpu::collect() - Platform type: " + platform_type + ", has_temp_sensor: " + (bpu.has_temp_sensor ? "true" : "false"));
