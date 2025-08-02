@@ -1635,13 +1635,13 @@ namespace Bpu {
 				
 				if (s_contains(model_content, "S100")) {
 					platform_type = "rdks100";
-					bpu_count = 3; // BPU0, GPU(BPU1), VPU(BPU2)
+					bpu_count = 4; // BPU0, GPU, VPU, JPU
 					has_bpu = true;
 					Logger::debug("Bpu::detect_platform() - Detected RDK S100 platform with " + to_string(bpu_count) + " devices");
 				}
 				else if (s_contains(model_content, "X5")) {
 					platform_type = "rdkx5";
-					bpu_count = 2; // BPU0, GPU(BPU1)
+					bpu_count = 4; // BPU0, GPU, VPU, JPU
 					has_bpu = true;
 					Logger::debug("Bpu::detect_platform() - Detected RDK X5 platform with " + to_string(bpu_count) + " devices");
 				}
@@ -1669,6 +1669,197 @@ namespace Bpu {
 			current_bpu.temp.resize(bpu_count);
 			current_bpu.has_temp_sensor = (platform_type == "rdks100" or platform_type == "rdkx5");
 			current_bpu.temp_max = 100; // Default max temperature in Celsius
+			
+			// Initialize temperature data with default value to ensure it's never empty
+			if (current_bpu.has_temp_sensor) {
+				current_bpu.temp[0].push_back(0); // Initial temperature value
+				Logger::debug("Bpu::detect_platform() - Initialized temperature data for " + platform_type);
+			}
+		}
+	}
+
+	//* Platform-specific data collection functions
+	void collect_rdk_s100_data(bpu_info& bpu) {
+		Logger::debug("Bpu::collect_rdk_s100_data() - Collecting S100 platform data");
+		
+		// BPU0 - Brain Processing Unit
+		string bpu0_usage = readfile("/sys/devices/system/bpu/bpu0/ratio", "0");
+		if (not bpu0_usage.empty() and isint(bpu0_usage)) {
+			const long long usage = stol(bpu0_usage);
+			bpu.usage[0].push_back(clamp(usage, 0ll, 100ll));
+			while (bpu.usage[0].size() > 40) bpu.usage[0].pop_front();
+			Logger::debug("Bpu::collect_rdk_s100_data() - BPU0 usage: " + to_string(usage) + "%");
+		}
+		
+		// GPU - Mali GPU with DVFS utilization parsing
+		Logger::debug("Bpu::collect_rdk_s100_data() - Starting GPU processing");
+		try {
+			string dvfs_content = readfile("/sys/kernel/debug/mali0/dvfs_utilization", "");
+			Logger::debug("Bpu::collect_rdk_s100_data() - DVFS content length: " + to_string(dvfs_content.length()));
+			
+			long long busy_time = 0, idle_time = 0;
+			if (!dvfs_content.empty()) {
+				Logger::debug("Bpu::collect_rdk_s100_data() - DVFS content: '" + dvfs_content + "'");
+				
+				// Simple parsing using basic string operations
+				size_t busy_pos = dvfs_content.find("busy_time:");
+				if (busy_pos != string::npos) {
+					size_t start_pos = busy_pos + 10; // Skip "busy_time:"
+					// Skip whitespace after colon
+					while (start_pos < dvfs_content.length() && std::isspace(dvfs_content[start_pos])) {
+						start_pos++;
+					}
+					size_t end_pos = dvfs_content.find(' ', start_pos);
+					if (end_pos == string::npos) end_pos = dvfs_content.length();
+					
+					if (start_pos < dvfs_content.length()) {
+						string busy_str = dvfs_content.substr(start_pos, end_pos - start_pos);
+						busy_str = trim(busy_str);
+						Logger::debug("Bpu::collect_rdk_s100_data() - Busy string: '" + busy_str + "'");
+						if (isint(busy_str)) {
+							busy_time = std::stoll(busy_str);
+							Logger::debug("Bpu::collect_rdk_s100_data() - Busy time: " + to_string(busy_time));
+						}
+					}
+				}
+				
+				size_t idle_pos = dvfs_content.find("idle_time:");
+				if (idle_pos != string::npos) {
+					size_t start_pos = idle_pos + 10; // Skip "idle_time:"
+					// Skip whitespace after colon
+					while (start_pos < dvfs_content.length() && std::isspace(dvfs_content[start_pos])) {
+						start_pos++;
+					}
+					size_t end_pos = dvfs_content.find('\n', start_pos);
+					if (end_pos == string::npos) end_pos = dvfs_content.length();
+					
+					if (start_pos < dvfs_content.length()) {
+						string idle_str = dvfs_content.substr(start_pos, end_pos - start_pos);
+						idle_str = trim(idle_str);
+						Logger::debug("Bpu::collect_rdk_s100_data() - Idle string: '" + idle_str + "'");
+						if (isint(idle_str)) {
+							idle_time = std::stoll(idle_str);
+							Logger::debug("Bpu::collect_rdk_s100_data() - Idle time: " + to_string(idle_time));
+						}
+					}
+				}
+				
+				Logger::debug("Bpu::collect_rdk_s100_data() - Parsed times: busy=" + to_string(busy_time) + ", idle=" + to_string(idle_time));
+				
+				// Calculate usage based on delta from last collection
+				long long gpu_usage = 0;
+				if (busy_time > 0 || idle_time > 0) {
+					long long busy_delta = busy_time - bpu.gpu_busy_old;
+					long long idle_delta = idle_time - bpu.gpu_idle_old;
+					long long total_delta = busy_delta + idle_delta;
+					
+					Logger::debug("Bpu::collect_rdk_s100_data() - GPU deltas: busy=" + to_string(busy_delta) + ", idle=" + to_string(idle_delta));
+					
+					if (total_delta > 0 && (bpu.gpu_busy_old > 0 || bpu.gpu_idle_old > 0)) {
+						gpu_usage = (busy_delta * 100) / total_delta;
+						Logger::debug("Bpu::collect_rdk_s100_data() - Calculated GPU usage: " + to_string(gpu_usage) + "%");
+					}
+					
+					// Update old values for next calculation
+					bpu.gpu_busy_old = busy_time;
+					bpu.gpu_idle_old = idle_time;
+				}
+				
+				bpu.usage[1].push_back(clamp(gpu_usage, 0ll, 100ll));
+				while (bpu.usage[1].size() > 40) bpu.usage[1].pop_front();
+				Logger::debug("Bpu::collect_rdk_s100_data() - Final GPU usage: " + to_string(gpu_usage) + "%");
+			}
+			else {
+				bpu.usage[1].push_back(0);
+				while (bpu.usage[1].size() > 40) bpu.usage[1].pop_front();
+				Logger::debug("Bpu::collect_rdk_s100_data() - GPU usage: 0% (empty dvfs)");
+			}
+		}
+		catch (const std::exception& e) {
+			Logger::debug("Bpu::collect_rdk_s100_data() - GPU parsing error: " + string(e.what()));
+			bpu.usage[1].push_back(0);
+			while (bpu.usage[1].size() > 40) bpu.usage[1].pop_front();
+		}
+		Logger::debug("Bpu::collect_rdk_s100_data() - GPU processing completed");
+		
+		// VPU - Video Processing Unit
+		string vpu_usage = readfile("/sys/kernel/debug/vpu/loading", "0");
+		if (not vpu_usage.empty() and isint(vpu_usage)) {
+			const long long usage = stol(vpu_usage);
+			bpu.usage[2].push_back(clamp(usage, 0ll, 100ll));
+			while (bpu.usage[2].size() > 40) bpu.usage[2].pop_front();
+			Logger::debug("Bpu::collect_rdk_s100_data() - VPU usage: " + to_string(usage) + "%");
+		}
+		
+		// JPU - JPEG Processing Unit
+		string jpu_usage = readfile("/sys/kernel/debug/jpu/loading", "0");
+		if (not jpu_usage.empty() and isint(jpu_usage)) {
+			const long long usage = stol(jpu_usage);
+			bpu.usage[3].push_back(clamp(usage, 0ll, 100ll));
+			while (bpu.usage[3].size() > 40) bpu.usage[3].pop_front();
+			Logger::debug("Bpu::collect_rdk_s100_data() - JPU usage: " + to_string(usage) + "%");
+		}
+	}
+	
+	void collect_rdk_x5_data(bpu_info& bpu) {
+		Logger::debug("Bpu::collect_rdk_x5_data() - Collecting X5 platform data");
+		
+		// BPU0 - Brain Processing Unit
+		string bpu0_usage = readfile("/sys/devices/system/bpu/bpu0/ratio", "0");
+		if (not bpu0_usage.empty() and isint(bpu0_usage)) {
+			const long long usage = stol(bpu0_usage);
+			bpu.usage[0].push_back(clamp(usage, 0ll, 100ll));
+			while (bpu.usage[0].size() > 40) bpu.usage[0].pop_front();
+			Logger::debug("Bpu::collect_rdk_x5_data() - BPU0 usage: " + to_string(usage) + "%");
+		}
+		
+		// GPU - Graphics Processing Unit
+		string gpu_usage = readfile("/sys/kernel/debug/gc/load", "0");
+		if (not gpu_usage.empty() and isint(gpu_usage)) {
+			const long long usage = stol(gpu_usage);
+			bpu.usage[1].push_back(clamp(usage, 0ll, 100ll));
+			while (bpu.usage[1].size() > 40) bpu.usage[1].pop_front();
+			Logger::debug("Bpu::collect_rdk_x5_data() - GPU usage: " + to_string(usage) + "%");
+		}
+		
+		// VPU - Video Processing Unit
+		string vpu_usage = readfile("/sys/kernel/debug/vpu/loading", "0");
+		if (not vpu_usage.empty() and isint(vpu_usage)) {
+			const long long usage = stol(vpu_usage);
+			bpu.usage[2].push_back(clamp(usage, 0ll, 100ll));
+			while (bpu.usage[2].size() > 40) bpu.usage[2].pop_front();
+			Logger::debug("Bpu::collect_rdk_x5_data() - VPU usage: " + to_string(usage) + "%");
+		}
+		
+		// JPU - JPEG Processing Unit
+		string jpu_usage = readfile("/sys/kernel/debug/jpu/loading", "0");
+		if (not jpu_usage.empty() and isint(jpu_usage)) {
+			const long long usage = stol(jpu_usage);
+			bpu.usage[3].push_back(clamp(usage, 0ll, 100ll));
+			while (bpu.usage[3].size() > 40) bpu.usage[3].pop_front();
+			Logger::debug("Bpu::collect_rdk_x5_data() - JPU usage: " + to_string(usage) + "%");
+		}
+	}
+	
+	void collect_rdk_x3_data(bpu_info& bpu) {
+		Logger::debug("Bpu::collect_rdk_x3_data() - Collecting X3 platform data");
+		
+		// BPU0 - Brain Processing Unit 0
+		string bpu0_usage = readfile("/sys/devices/system/bpu/bpu0/ratio", "0");
+		if (not bpu0_usage.empty() and isint(bpu0_usage)) {
+			const long long usage = stol(bpu0_usage);
+			bpu.usage[0].push_back(clamp(usage, 0ll, 100ll));
+			while (bpu.usage[0].size() > 40) bpu.usage[0].pop_front();
+			Logger::debug("Bpu::collect_rdk_x3_data() - BPU0 usage: " + to_string(usage) + "%");
+		}
+		
+		// BPU1 - Brain Processing Unit 1
+		string bpu1_usage = readfile("/sys/devices/system/bpu/bpu1/ratio", "0");
+		if (not bpu1_usage.empty() and isint(bpu1_usage)) {
+			const long long usage = stol(bpu1_usage);
+			bpu.usage[1].push_back(clamp(usage, 0ll, 100ll));
+			while (bpu.usage[1].size() > 40) bpu.usage[1].pop_front();
+			Logger::debug("Bpu::collect_rdk_x3_data() - BPU1 usage: " + to_string(usage) + "%");
 		}
 	}
 
@@ -1681,93 +1872,33 @@ namespace Bpu {
 		Logger::debug("Bpu::collect() - Starting collection for platform: " + platform_type + " with " + to_string(bpu_count) + " devices");
 
 		try {
-			for (int i = 0; i < bpu_count; i++) {
-				string usage_str;
-				
-				if (i == 0) {
-					const string ratio_path = "/sys/devices/system/bpu/bpu0/ratio";
-					Logger::debug("Bpu::collect() - Reading BPU0 from: " + ratio_path);
-					usage_str = readfile(ratio_path, "0");
-				}
-				else if (i == 1) {
-					// BPU1 for X3, GPU for X5 and S100
-					if (platform_type == "rdkx3") {
-						const string ratio_path = "/sys/devices/system/bpu/bpu1/ratio";
-						Logger::debug("Bpu::collect() - Reading BPU1 from: " + ratio_path);
-						usage_str = readfile(ratio_path, "0");
-					}
-					else if (platform_type == "rdkx5") {
-						// X5 GPU
-						Logger::debug("Bpu::collect() - Reading X5 GPU from: /sys/kernel/debug/gc/load");
-						usage_str = readfile("/sys/kernel/debug/gc/load", "0");
-					}
-					else if (platform_type == "rdks100") {
-						// S100 GPU
-						Logger::debug("Bpu::collect() - Reading S100 GPU from: /sys/kernel/debug/mali_gpu_power/max_utilization");
-						// 正确解析mali0 dvfs_utilization文件，提取busy_time和idle_time并计算使用率
-						{
-							const string dvfs_path = "/sys/kernel/debug/mali0/dvfs_utilization";
-							string dvfs_content = readfile(dvfs_path, "");
-							long long busy_time = 0, idle_time = 0;
-							if (!dvfs_content.empty()) {
-								// 期望格式: "busy_time: 0 idle_time: 0"
-								size_t busy_pos = dvfs_content.find("busy_time:");
-								size_t idle_pos = dvfs_content.find("idle_time:");
-								if (busy_pos != string::npos && idle_pos != string::npos) {
-									// 提取busy_time
-									size_t busy_val_start = busy_pos + 10;
-									size_t busy_val_end = dvfs_content.find(' ', busy_val_start);
-									string busy_str = dvfs_content.substr(busy_val_start, busy_val_end - busy_val_start);
-									busy_time = isint(busy_str) ? std::stoll(busy_str) : 0;
-									// 提取idle_time
-									size_t idle_val_start = idle_pos + 10;
-									size_t idle_val_end = dvfs_content.find('\n', idle_val_start);
-									string idle_str = dvfs_content.substr(idle_val_start, idle_val_end - idle_val_start);
-									idle_time = isint(idle_str) ? std::stoll(idle_str) : 0;
-								}
-								if (busy_time + idle_time > 0) {
-									double utilization = (double)busy_time / (busy_time + idle_time) * 100.0;
-									usage_str = std::to_string((long long)utilization);
-								} else {
-									usage_str = "0";
-								}
-							} else {
-								usage_str = "0";
-							}
-						}
-					}
-				}
-				else if (i == 2 and platform_type == "rdks100") {
-					// S100 VPU (BPU2)
-					Logger::debug("Bpu::collect() - Reading S100 VPU from: /sys/kernel/debug/vpu/loading");
-					usage_str = readfile("/sys/kernel/debug/vpu/loading", "0");
-				}
-				
-				if (not usage_str.empty() and isint(usage_str)) {
-					const long long usage = stol(usage_str);
-					bpu.usage[i].push_back(clamp(usage, 0ll, 100ll));
-					
-					// Keep only recent data for graphs
-					while (bpu.usage[i].size() > 40) bpu.usage[i].pop_front();
-				}
+			// Platform-specific data collection
+			if (platform_type == "rdks100") {
+				collect_rdk_s100_data(bpu);
+			}
+			else if (platform_type == "rdkx5") {
+				collect_rdk_x5_data(bpu);
+			}
+			else if (platform_type == "rdkx3") {
+				collect_rdk_x3_data(bpu);
 			}
 
-			// Collect BPU temperature if available
 			if (bpu.has_temp_sensor) {
 				string temp_path;
+				Logger::debug("Bpu::collect() - Platform type: " + platform_type + ", has_temp_sensor: " + (bpu.has_temp_sensor ? "true" : "false"));
 				if (platform_type == "rdks100") {
 					temp_path = "/sys/class/hwmon/hwmon0/temp5_input";
 				}
 				else if (platform_type == "rdkx5") {
 					temp_path = "/sys/class/hwmon/hwmon0/temp2_input";
 				}
-
+				Logger::debug("Bpu::collect() - Temp path: " + temp_path);
 				if (not temp_path.empty()) {
 					const string temp_str = readfile(temp_path, "0");
 					if (not temp_str.empty() and isint(temp_str)) {
 						const long long temp_millicelsius = stol(temp_str);
 						const long long temp_celsius = temp_millicelsius / 1000;
-						
+						Logger::debug("Bpu::collect() - Temperature conversion: " + to_string(temp_millicelsius) + " milliC -> " + to_string(temp_celsius) + "°C");
 						if (platform_type == "rdkx5") {
 							if (not bpu.usage[0].empty() and bpu.usage[0].back() > 0) {
 								bpu.temp[0].push_back(temp_celsius);

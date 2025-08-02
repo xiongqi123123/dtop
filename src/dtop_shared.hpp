@@ -123,13 +123,16 @@ namespace Bpu {
 	extern int x, y, width, height, min_width, min_height;
 	extern bool shown, redraw, has_bpu;
 	extern string platform_type; // "rdks100", "rdkx5", "rdkx3"
-	extern int bpu_count; // 1 for rdks100/rdkx5, 2 for rdkx3
+	extern int bpu_count; // S100: 4 (BPU+GPU+VPU+JPU), X5: 4 (BPU+GPU+VPU+JPU), X3: 2 (BPU0+BPU1)
 
 	struct bpu_info {
-		vector<deque<long long>> usage; // BPU usage percentage for each core
-		vector<deque<long long>> temp;  // BPU temperature for each core (if available)
+		vector<deque<long long>> usage; // Usage percentage for each processing unit (BPU, GPU, VPU, JPU)
+		vector<deque<long long>> temp;  // Temperature for each processing unit (if available)
 		long long temp_max = 0;
 		bool has_temp_sensor = false;
+		// GPU累积时间存储（用于计算使用率差值）
+		long long gpu_busy_old = 0;
+		long long gpu_idle_old = 0;
 	};
 
 	//* Collect BPU stats and temperatures
@@ -140,6 +143,11 @@ namespace Bpu {
 
 	//* Detect platform type and BPU configuration
 	void detect_platform();
+
+	//* Platform-specific data collection functions
+	void collect_rdk_s100_data(bpu_info& bpu);
+	void collect_rdk_x5_data(bpu_info& bpu);
+	void collect_rdk_x3_data(bpu_info& bpu);
 }
 
 namespace Mem {

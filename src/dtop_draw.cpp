@@ -823,13 +823,21 @@ namespace Cpu {
 			}
 			out += Theme::c("div_line") + Symbols::v_line;
 
-			int bpu_cx = 0, bpu_cy = 1, bpu_cc = 0;
-			const int bpu_columns = 1;
+			const int bpu_columns = 2;
 			int bpu_line_width_needed = (show_temps ? 15 : 9);
+			const int bpu_column_width = bpu_b_width / bpu_columns;
 			
-			const vector<string> bpu_core_names = {"BPU", "GPU", "VPU"};
+			const vector<string> bpu_core_names = {"BPU", "GPU", "VPU", "JPU"};
 
 			for (const auto& n : iota(0, (int)bpu.usage.size())) {
+				// Calculate row and column for row-major layout (left-to-right, top-to-bottom)
+				const int bpu_row = n / bpu_columns;        // Row index (0, 1, 2, ...)
+				const int bpu_col = n % bpu_columns;        // Column index (0, 1)
+				
+				const int bpu_cy = bpu_row + 1;             // Y position (1-based)
+				const int bpu_cx = bpu_col * bpu_column_width; // X position
+				
+				// Check boundaries
 				if (bpu_b_x + bpu_cx + bpu_line_width_needed >= bpu_right_boundary) break;
 				if (bpu_cy >= bpu_b_height - 2) break;
 
@@ -855,13 +863,6 @@ namespace Cpu {
 				// }
 
 				out += Theme::c("div_line") + Symbols::v_line; 
-
-				if (++bpu_cy > ceil((double)bpu.usage.size() / bpu_columns) and n != (int)bpu.usage.size() - 1) {
-					if (++bpu_cc >= bpu_columns) break;
-					bpu_cy = 1;
-					bpu_cx = (bpu_b_width / bpu_columns) * bpu_cc;
-					if (bpu_b_x + bpu_cx + bpu_line_width_needed >= bpu_right_boundary) break;
-				}
 			}
 		}
 
