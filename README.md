@@ -20,7 +20,7 @@
 
 ```bash
 # 下载预编译文件
-wget https://github.com/your-username/dtop/releases/download/v1.1.0/dtop-arm64-ubuntu22.04.tar.gz
+wget https://github.com/xiongqi123123/dtop/releases/download/v1.1.0/dtop-arm64-ubuntu22.04.tar.gz
 # 解压安装
 tar -xzf dtop-arm64-ubuntu22.04.tar.gz
 sudo cp dtop /usr/local/bin/
