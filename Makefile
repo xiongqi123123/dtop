@@ -77,6 +77,7 @@ SRCDIR		:= src
 INCDIR		:= include
 BUILDDIR	:= obj
 TARGETDIR	:= bin
+DEBIANDIR	:= debian
 SRCEXT		:= cpp
 DEPEXT		:= d
 OBJEXT		:= o
@@ -100,6 +101,18 @@ OBJECTS	:= $(patsubst $(SRCDIR)/%,$(BUILDDIR)/%,$(SOURCES:.$(SRCEXT)=.$(OBJEXT))
 
 #? Default Make
 all: pre directories dtop
+
+debian: pre directories dtop
+	@rm -rf $(DEBIANDIR)/*
+	@cp -rf DEBIAN $(DEBIANDIR)
+	@sed -i 's/$${VERSION}/$(DTOP_VERSION)/' $(DEBIANDIR)/DEBIAN/control
+	@install -d $(DEBIANDIR)/usr/hobot/bin/
+	@install -m 755 $(TARGETDIR)/dtop $(DEBIANDIR)/usr/hobot/bin/
+	@install -d $(DEBIANDIR)/usr/share/doc/dtop
+	@install -m 666 README.md $(DEBIANDIR)/usr/share/doc/dtop
+	@install -d $(DEBIANDIR)/usr/share/doc/dtop/themes
+	@install themes/* $(DEBIANDIR)/usr/share/doc/dtop/themes
+	@fakeroot dpkg-deb -b $(DEBIANDIR) ./
 
 pre:
 	@printf " $(BANNER)\n"
@@ -128,11 +141,13 @@ help:
 	@printf "  install      Install dtop++ to \$$PREFIX ($(PREFIX))\n"
 	@printf "  setuid       Set installed binary owner/group to \$$SU_USER/\$$SU_GROUP ($(SU_USER)/$(SU_GROUP)) and set SUID bit\n"
 	@printf "  uninstall    Uninstall dtop++ from \$$PREFIX\n"
+	@printf "  debian       Create debian package from \$$TARGETDIR\n"
 
 #? Make the Directories
 directories:
 	@mkdir -p $(TARGETDIR)
 	@mkdir -p $(BUILDDIR)/$(PLATFORM_DIR)
+	@mkdir -p $(DEBIANDIR)/
 
 #? Clean only Objects
 clean:
@@ -142,7 +157,7 @@ clean:
 #? Clean Objects and Binaries
 distclean: clean
 	@printf "\033[1;91mRemoving: \033[1;97mbuilt binaries...\033[0m\n"
-	@rm -rf $(TARGETDIR)
+	@rm -rf $(TARGETDIR) $(DEBIANDIR)
 
 install:
 	@printf "\033[1;92mInstalling binary to: \033[1;97m$(DESTDIR)$(PREFIX)/bin/dtop\n"
@@ -197,4 +212,4 @@ $(BUILDDIR)/%.$(OBJEXT): $(SRCDIR)/%.$(SRCEXT)
 	@printf "\033[1;92m-> \033[1;37m$@ \033[100D\033[35C\033[1;93m(\033[1;97m$$(du -ah $@ | cut -f1)iB\033[1;93m) \033[92m(\033[97m$$(date -d @$$(expr $$(date +%s 2>/dev/null || echo "0") - $${TSTAMP} 2>/dev/null) -u +%Mm:%Ss 2>/dev/null | sed 's/^00m://' || echo '')\033[92m)\033[0m\n"
 
 #? Non-File Targets
-.PHONY: all msg help pre
+.PHONY: all msg help pre debian
