@@ -1,0 +1,14 @@
+Package: dtop
+Version: ${VERSION}
+Architecture: arm64
+Maintainer: developer@d-robotics.cc
+Original-Maintainer: Qi Xiong (SkyXZ) <xiongqi0412@163.com>
+Section: utils
+Priority: optional
+Depends: libc6 (>= 2.34), libgcc-s1 (>= 3.3.1), libstdc++6 (>= 11)
+Homepage: https://github.com/xiongqi123123/dtop
+Description: dtop is a command line resource monitor created from btop,
+ optimized for D-Robotics RDK Platform.
+ Currently supported RDK Platforms are:
+  - RDK X5
+  - RDK S100/S100P
